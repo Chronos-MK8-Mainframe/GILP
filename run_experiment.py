@@ -75,36 +75,54 @@ def run_experiment():
     
     print("\n--- 3. Training Loop ---")
     for epoch in range(51):
-        loss, l_geo, l_sep = trainer.train_step(
+        metrics = trainer.train_step(
             rule_tokens, 
             rule_types, 
             graph_data.edge_index, 
             graph_data.edge_type
         )
         if epoch % 10 == 0:
-            print(f"Epoch {epoch}: Total Loss={loss:.4f} (Geo={l_geo:.4f}, Sep={l_sep:.4f})")
+            print(f"Epoch {epoch}: Total Loss={metrics['loss']:.4f} (Geo={metrics['l_hyp']:.4f}, Fossil={metrics['l_fossil']:.4f})")
             
     print("\n--- 4. Search / Inference ---")
     model.eval()
+    
+    # Test 1: ON Mode (Full Graph - Baseline)
+    print("\n[Mode: ON] Using Full Graph for Inference (Heuristics ON)")
     with torch.no_grad():
-        embeddings = model(rule_tokens, rule_types, graph_data.edge_index, graph_data.edge_type)
+        z_on = model(rule_tokens, rule_types, graph_data.edge_index, graph_data.edge_type)
         
-    searcher = AHSPSearch(embeddings)
+    searcher_on = AHSPSearch(z_on)
+    start_id = 1 # Zero
+    goal_id = 10 # RecursiveMult
     
-    # Try to find path from "Zero" (1) to "RecursiveMult" (10)
-    start_id = 1
-    goal_id = 10
+    path_on = searcher_on.find_path(start_id, goal_id)
+    print(f"Path (ON):", path_on)
+    print("Path names:", [kb.get_rule(idx).name for idx in path_on])
     
-    path = searcher.find_path(start_id, goal_id)
-    print(f"Finding path from {kb.get_rule(start_id).name} to {kb.get_rule(goal_id).name}")
-    print("Path found (IDs):", path)
-    print("Path names:", [kb.get_rule(idx).name for idx in path])
+    # Test 2: OFF Mode (Empty Graph - Fossilization Test)
+    print("\n[Mode: OFF] Using Empty Graph for Inference (Heuristics OFF)")
+    empty_edge_index = torch.empty((2, 0), dtype=torch.long, device=graph_data.edge_index.device)
+    empty_edge_type = torch.empty((0,), dtype=torch.long, device=graph_data.edge_type.device)
     
-    # Verify contradiction separation
-    c1 = embeddings[11]
-    c2 = embeddings[12]
+    with torch.no_grad():
+        z_off = model(rule_tokens, rule_types, empty_edge_index, empty_edge_type)
+        
+    searcher_off = AHSPSearch(z_off)
+    path_off = searcher_off.find_path(start_id, goal_id)
+    print(f"Path (OFF):", path_off)
+    print("Path names:", [kb.get_rule(idx).name for idx in path_off])
+    
+    if len(path_off) > 0 and path_off[-1] == goal_id:
+        print("\n>>> SUCCESS: Fossilization worked! Model navigated correctly without edges.")
+    else:
+        print("\n>>> FAILURE: Model failed to navigate without edges.")
+    
+    # Verify contradiction separation (using ON embeddings as reference, though OFF should also be separated)
+    c1 = z_on[11]
+    c2 = z_on[12]
     dist = torch.norm(c1 - c2).item()
-    print(f"\nDist between contradictions: {dist:.4f} (Should be > margin)")
+    print(f"\nDist between contradictions (ON): {dist:.4f} (Should be > margin)")
 
 if __name__ == "__main__":
     run_experiment()

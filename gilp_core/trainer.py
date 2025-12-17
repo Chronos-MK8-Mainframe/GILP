@@ -290,30 +290,57 @@ class GILPTrainer:
             
         return loss.mean() / num_negatives
 
+    def fossilization_loss(self, z_pred, z_target):
+        """
+        L_fossil: Pull z_pred (Text-Only) towards z_target (Graph-Aware/True)
+        Minimizes Hyperbolic Distance between them.
+        """
+        dist = self.manifold.dist(z_pred, z_target)
+        return dist.mean()
+
     def train_step(self, rule_tokens, rule_types, edge_index, edge_type, edge_weight=None):
         self.model.train()
         self.optimizer.zero_grad()
         
-        # Proto-3: Model returns only embeddings (Hyperbolic)
-        embeddings = self.model(rule_tokens, rule_types, edge_index, edge_type, edge_weight)
+        # 1. True Fossilization (With Graph Structure)
+        # This provides the "Ground Truth" geometry based on logic rules
+        z_graph = self.model(rule_tokens, rule_types, edge_index, edge_type, edge_weight)
         
-        # Filter dependency edges (Logic structure)
+        # Hyperbolic Contrastive Loss on the Graph Embedding
         mask_dep = (edge_type == 0)
         if mask_dep.sum() > 0:
             dep_edge_index = edge_index[:, mask_dep]
-            l_hyp = self.hyperbolic_contrastive_loss(embeddings, dep_edge_index)
+            l_hyp = self.hyperbolic_contrastive_loss(z_graph, dep_edge_index)
         else:
-            l_hyp = torch.tensor(0.0, device=embeddings.device)
+            l_hyp = torch.tensor(0.0, device=z_graph.device)
             
+        # 2. Fossilization Pulling (Text Only -> Graph)
+        # We want the model to be able to predict this geometry WITHOUT edges (OFF mode).
+        # So we run the model with an EMPTY graph.
+        
+        empty_edge_index = torch.empty((2, 0), dtype=torch.long, device=edge_index.device)
+        empty_edge_type = torch.empty((0,), dtype=torch.long, device=edge_type.device)
+        
+        # Forward pass without edges (Pure Text + Type)
+        z_text = self.model(rule_tokens, rule_types, empty_edge_index, empty_edge_type, None)
+        
+        # Calculate Pulling Loss
+        # We detach z_graph because it is the target (Teacher). 
+        # We don't want the graph view to degrade to match the uninformed text view.
+        l_fossil = self.fossilization_loss(z_text, z_graph.detach())
+        
         # Total Loss
-        loss = l_hyp
+        # User requested "pooling of true fossilization". 
+        # We combine the structural loss and the consistency loss.
+        loss = l_hyp + l_fossil
         
         loss.backward()
         self.optimizer.step()
         
         metrics = {
             "loss": loss.item(),
-            "l_hyp": l_hyp.item()
+            "l_hyp": l_hyp.item(),
+            "l_fossil": l_fossil.item()
         }
         
         return metrics
