@@ -263,7 +263,7 @@ class GILPTrainer:
         var = torch.var(potentials[mask])
         return torch.clamp(epsilon - var, min=0)
 
-    def hyperbolic_contrastive_loss(self, embeddings, edge_index, margin=1.0, num_negatives=5):
+    def hyperbolic_contrastive_loss(self, embeddings, edge_index, margin=1.0, num_negatives=20):
         """
         Proto-3: Enforce Hyperbolic Locality.
         d_H(u, v) < d_H(u, negative) - margin
@@ -298,49 +298,70 @@ class GILPTrainer:
         dist = self.manifold.dist(z_pred, z_target)
         return dist.mean()
 
+    def target_distance_loss(self, embeddings, edge_index, target=0.5):
+        """
+        Enforces a specific distance 'target' for connected edges.
+        Prevents collapse (d->0) and enables stepwise navigation.
+        """
+        src, dst = edge_index
+        if src.numel() == 0:
+            return torch.tensor(0.0, device=embeddings.device)
+            
+        dists = self.manifold.dist(embeddings[src], embeddings[dst])
+        # MSE against target
+        return ((dists - target) ** 2).mean()
+
     def train_step(self, rule_tokens, rule_types, edge_index, edge_type, edge_weight=None):
         self.model.train()
         self.optimizer.zero_grad()
         
-        # 1. True Fossilization (With Graph Structure)
-        # This provides the "Ground Truth" geometry based on logic rules
+        # 1. True Fossilization (Graph-Aware)
         z_graph = self.model(rule_tokens, rule_types, edge_index, edge_type, edge_weight)
         
-        # Hyperbolic Contrastive Loss on the Graph Embedding
+        # A. Structure Loss: Unit Steps (Springs)
+        # For Type 0 (Prereq) edges, we want d(u,v) approx 0.5 (or user defined step)
+        # This prevents "Shortcuts" in geometry, enforcing A->B->C structure.
         mask_dep = (edge_type == 0)
         if mask_dep.sum() > 0:
             dep_edge_index = edge_index[:, mask_dep]
-            l_hyp = self.hyperbolic_contrastive_loss(z_graph, dep_edge_index)
+            # Target distance 0.5 ensures that A->C (dist ~1.0) is not a neighbor in 0.5-radius search
+            l_struct = self.target_distance_loss(z_graph, dep_edge_index, target=0.5) 
         else:
-            l_hyp = torch.tensor(0.0, device=z_graph.device)
+            l_struct = torch.tensor(0.0, device=z_graph.device)
             
-        # 2. Fossilization Pulling (Text Only -> Graph)
-        # We want the model to be able to predict this geometry WITHOUT edges (OFF mode).
-        # So we run the model with an EMPTY graph.
+        # B. Repulsion Loss (Contrastive)
+        # Explicitly push away random negatives to keep manifold expanding
+        # reused existing function but we focus on negatives
+        # The existing function pulls positives too. Let's use it but maybe with margin > 0.5
+        # Actually, let's trust the target_distance_loss for pull, and this for push?
+        # Simpler: Use hyperbolic_contrastive but with matched margin?
+        # Let's keep it simple: Structure (Pull to 0.5) + Repulsion (Push Negatives).
         
+        # We'll use a pure repulsion based on "margin".
+        # d(u, neg) > margin.
+        l_repul = self.hyperbolic_contrastive_loss(z_graph, dep_edge_index, margin=1.0, num_negatives=20)
+        # Note: The above calculates max(0, d_pos - d_neg + margin). 
+        # Since we punish d_pos!=0.5 in l_struct, this might conflict if d_pos tries to go to 0.
+        # But if we treat this as just "Separation", it's fine.
+        
+        # 2. Fossilization (Text-Only -> Graph)
         empty_edge_index = torch.empty((2, 0), dtype=torch.long, device=edge_index.device)
         empty_edge_type = torch.empty((0,), dtype=torch.long, device=edge_type.device)
         
-        # Forward pass without edges (Pure Text + Type)
         z_text = self.model(rule_tokens, rule_types, empty_edge_index, empty_edge_type, None)
-        
-        # Calculate Pulling Loss
-        # We detach z_graph because it is the target (Teacher). 
-        # We don't want the graph view to degrade to match the uninformed text view.
         l_fossil = self.fossilization_loss(z_text, z_graph.detach())
         
-        # Total Loss
-        # User requested "pooling of true fossilization". 
-        # We combine the structural loss and the consistency loss.
-        loss = l_hyp + l_fossil
+        # Total
+        loss = l_struct + l_fossil + 0.1 * l_repul # Weight repulsion less to prioritize structure
         
         loss.backward()
         self.optimizer.step()
         
         metrics = {
             "loss": loss.item(),
-            "l_hyp": l_hyp.item(),
-            "l_fossil": l_fossil.item()
+            "l_struct": l_struct.item(),
+            "l_fossil": l_fossil.item(),
+            "l_repul": l_repul.item()
         }
         
         return metrics

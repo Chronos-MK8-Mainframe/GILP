@@ -74,7 +74,7 @@ def run_experiment():
     rule_types = torch.zeros(len(kb.rules), dtype=torch.long) # All type 0 for now
     
     print("\n--- 3. Training Loop ---")
-    for epoch in range(51):
+    for epoch in range(201):
         metrics = trainer.train_step(
             rule_tokens, 
             rule_types, 
@@ -96,9 +96,10 @@ def run_experiment():
     start_id = 1 # Zero
     goal_id = 10 # RecursiveMult
     
-    path_on = searcher_on.find_path(start_id, goal_id)
-    print(f"Path (ON):", path_on)
-    print("Path names:", [kb.get_rule(idx).name for idx in path_on])
+    path_on, d_on, status_on = searcher_on.find_path_hyperbolic_greedy(start_id, goal_id)
+    print(f"Path (ON): {path_on} [{status_on}]")
+    if path_on:
+        print("Path names:", [kb.get_rule(idx).name for idx in path_on])
     
     # Test 2: OFF Mode (Empty Graph - Fossilization Test)
     print("\n[Mode: OFF] Using Empty Graph for Inference (Heuristics OFF)")
@@ -109,20 +110,57 @@ def run_experiment():
         z_off = model(rule_tokens, rule_types, empty_edge_index, empty_edge_type)
         
     searcher_off = AHSPSearch(z_off)
-    path_off = searcher_off.find_path(start_id, goal_id)
-    print(f"Path (OFF):", path_off)
-    print("Path names:", [kb.get_rule(idx).name for idx in path_off])
+    path_off, d_off, status_off = searcher_off.find_path_hyperbolic_greedy(start_id, goal_id)
+    print(f"Path (OFF): {path_off} [{status_off}]")
+    if path_off:
+        print("Path names:", [kb.get_rule(idx).name for idx in path_off])
     
-    if len(path_off) > 0 and path_off[-1] == goal_id:
-        print("\n>>> SUCCESS: Fossilization worked! Model navigated correctly without edges.")
+    
+    if status_off == "SUCCESS":
+        print("\n>>> SUCCESS (Claim 2): Fossilization worked! Model navigated correctly without edges.")
     else:
-        print("\n>>> FAILURE: Model failed to navigate without edges.")
+        print(f"\n>>> FAILURE: Model failed to navigate without edges. Reason: {status_off}")
     
-    # Verify contradiction separation (using ON embeddings as reference, though OFF should also be separated)
+    # Test 3: Deep Composition (Claim 5)
+    # Trying path from Rule 0 ("Number") to Rule 10 ("RecursiveMult").
+    # Path: 0 -> 4 -> 8 -> 10 (or similar)
+    print("\n[Test 3: Composition] Navigation Depth Test (Claim 5)")
+    start_deep = 0
+    goal_deep = 10
+    path_deep, d_deep, status_deep = searcher_off.find_path_hyperbolic_greedy(start_deep, goal_deep)
+    print(f"Path (0->10): {path_deep} [{status_deep}]")
+    if path_deep:
+        print("Path names:", [kb.get_rule(idx).name for idx in path_deep])
+        
+    if status_deep == "SUCCESS" and len(path_deep) > 2:
+         print(">>> SUCCESS (Claim 5): Long-range composition preserved.")
+    
+    # Test 4: Meaningful Failure (Claim 4)
+    # Try to navigate from a Contradiction node (11) to a Logic node (1).
+    # They should be disconnected or remarkably far.
+    print("\n[Test 4: Meaningful Failure] Disconnected Graph Test (Claim 4)")
+    start_fail = 11
+    goal_fail = 1
+    
+    # Check initial distance
+    d_initial = trainer.manifold.dist(z_off[11:12], z_off[1:2]).item()
+    print(f"Distance 11->1: {d_initial:.4f} (Expect Large)")
+    
+    path_fail, d_fail_total, status_fail = searcher_off.find_path_hyperbolic_greedy(start_fail, goal_fail, max_steps=5)
+    print(f"Path (11->1): {path_fail} [{status_fail}]")
+    
+    if status_fail == "FAIL_LOCAL_MINIMA": 
+        print(">>> SUCCESS (Claim 4): Agent rightfully refused to move (No descent possible).")
+    elif status_fail == "FAIL_MAX_STEPS":
+         print(">>> WARNING: Agent wandered but didn't reach goal (Ambiguous result).")
+    elif status_fail == "SUCCESS":
+         print(f">>> WARNING: Agent found a path? (Maybe graph is connected via similarity?). Path: {path_fail}")
+
+    # Verify contradiction separation (Claim 3)
     c1 = z_on[11]
     c2 = z_on[12]
     dist = torch.norm(c1 - c2).item()
-    print(f"\nDist between contradictions (ON): {dist:.4f} (Should be > margin)")
+    print(f"\nDist between contradictions (Claim 3): {dist:.4f} (Should be > margin)")
 
 if __name__ == "__main__":
     run_experiment()
