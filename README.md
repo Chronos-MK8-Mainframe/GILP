@@ -110,5 +110,5 @@ python oracle_demo.py
 4. **Consistency**: Global manifold curvature prevents paradoxes. (Verified)
 5. **Transitivity**: Multi-hop paths are strictly longer than direct links. (Verified)
 
-**Project Lead**: Antigravity (Advanced Agentic Coding)
-**License**: MIT
+**Project Lead**: I'MnotSHRI(Chronos-MK8-mainframe)
+**License**: Apache License
