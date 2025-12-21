@@ -1,0 +1,22 @@
+[
+  {
+    "concept": "Expression:Happy",
+    "emotion_vector_hint": "Happy",
+    "code_content": "\nimport pygame\nimport math\nimport random\n\ndef render(screen, ticks):\n    width, height = screen.get_size()\n    \n    # Happy State: Bright Colors, Bouncing\n    t = ticks * 0.005\n    r = int(200 + 55 * math.sin(t))\n    g = int(200 + 55 * math.cos(t))\n    screen.fill((r, g, 0))\n    \n    # Bouncing Circle\n    cy = height // 2 + int(100 * math.abs(math.sin(t*2)))\n    pygame.draw.circle(screen, (255, 255, 255), (width//2, cy), 50)\n    \n    font = pygame.font.SysFont(\"Arial\", 40)\n    msg = font.render(\"I am Happy! :D\", True, (0, 0, 0))\n    screen.blit(msg, (50, 50))\n\n"
+  },
+  {
+    "concept": "Expression:Sad",
+    "emotion_vector_hint": "Sad",
+    "code_content": "\nimport pygame\nimport math\nimport random\n\ndef render(screen, ticks):\n    width, height = screen.get_size()\n    \n    # Sad State: Blue/Grey, Slow rain\n    screen.fill((20, 20, 60))\n    \n    # Rain drops\n    random.seed(int(ticks / 100))\n    for i in range(20):\n        x = random.randint(0, width)\n        y = (ticks * 0.5 + random.randint(0, height)) % height\n        pygame.draw.line(screen, (100, 100, 200), (x, y), (x, y+20), 2)\n        \n    font = pygame.font.SysFont(\"Arial\", 40)\n    msg = font.render(\"I feel sad...\", True, (200, 200, 255))\n    screen.blit(msg, (50, height - 100))\n\n"
+  },
+  {
+    "concept": "Expression:Angry",
+    "emotion_vector_hint": "Angry",
+    "code_content": "\nimport pygame\nimport math\nimport random\n\ndef render(screen, ticks):\n    width, height = screen.get_size()\n    \n    # Angry State: Red flashing, Jitter\n    if (ticks // 100) % 2 == 0:\n        screen.fill((100, 0, 0))\n    else:\n        screen.fill((50, 0, 0))\n        \n    # Shaking Box\n    ox = random.randint(-5, 5)\n    oy = random.randint(-5, 5)\n    pygame.draw.rect(screen, (0, 0, 0), (width//2 - 50 + ox, height//2 - 50 + oy, 100, 100))\n    \n    font = pygame.font.SysFont(\"Arial\", 50, bold=True)\n    msg = font.render(\"ERROR / ANGER\", True, (255, 255, 0))\n    screen.blit(msg, (width//2 - 100, height//2))\n\n"
+  },
+  {
+    "concept": "Expression:Calm",
+    "emotion_vector_hint": "Calm",
+    "code_content": "\nimport pygame\nimport math\nimport random\n\ndef render(screen, ticks):\n    width, height = screen.get_size()\n    \n    # Calm State: Slow breathing gradient\n    val = int(127 + 50 * math.sin(ticks * 0.001))\n    screen.fill((0, val, val))\n    \n    # Floating orb\n    cx = width//2 + int(100 * math.sin(ticks * 0.0005))\n    pygame.draw.circle(screen, (255, 255, 255), (cx, height//2), 40)\n    \n    font = pygame.font.SysFont(\"Arial\", 30)\n    msg = font.render(\"Systems Nominal.\", True, (255, 255, 255))\n    screen.blit(msg, (50, 50))\n\n"
+  }
+]

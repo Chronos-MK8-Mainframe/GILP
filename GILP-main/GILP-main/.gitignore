@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.gemini/
+TPTP-v9.2.1/
+*.png
+train_domain_step.py
+.vscode/
+TPTP-v9.2.1.tgz
+LLM/
+*.log
+diagnostic.py
